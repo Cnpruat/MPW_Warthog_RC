@@ -52,14 +52,21 @@ void setMotor(int pinENA, int pinIN1, int pinIN2, int pwmVal, bool forward) {
 // Fonction pour passer des infos renvoyés par l'interface web en commandes pour le système réel
 void piloterSysteme(int angleJoy, int forceJoy) {
   
-  // Gestion des MCC (en vitesse)
-  // L'info arrive entre -100 (Arrière) et 100 (Avant)
-  // On mappe 0-100 vers 0-255 (PWM)
-  int pwm = map(abs(forceJoy), 0, 100, 0, 255);
-  bool forward = (forceJoy >= 0);
+  // Normalisation de la force entre 0.0 et 1.0
+  float forceJoy_norm = abs(forceJoy_norm)/100.0;
+
+  // Fonction quadratique pour la PWM (accélération plus progressive)
+  int pwm = (int)(forceJoy_norm*forceJoy_norm*255);
+  
+  // Gestion du sens (avant / arrière)
+  bool forward = 0;
+  if (forceJoy >= 0)
+  {
+    forward = 1;
+  }
 
   // Zone morte
-  if (abs(forceJoy) < 5) pwm = 0;
+  if (pwm < 10) pwm = 0;
 
   // Application aux 4 moteurs en même temps
   // (Mettre -forward si l'un des moteur tourne à l'envers)
@@ -80,8 +87,8 @@ void piloterSysteme(int angleJoy, int forceJoy) {
   servo1.write(angleServo);
   servo2.write(180 - angleServo); // Miroir pour le 2ème servo
   
-  // Affichage
-  Serial.printf("Joy: %d° %d%% | Moteurs: %d | Servo: %d°\n", angleJoy, forceJoy, pwm, angleServo);
+  // Affichage consol (debug)
+  // Serial.printf("Joy: %d° %d%% | Moteurs: %d | Servo: %d°\n", angleJoy, forceJoy, pwm, angleServo);
 }
 
 /* ================= PAGE WEB (HTML/JS) ================= */
@@ -143,6 +150,14 @@ void handleRoot() {
 
     let deltaX = clientX - startX;
     let deltaY = clientY - startY;
+
+    // Zone morte
+    const steeringDeadZone = 15;
+    if (Math.abs(deltaX) < steeringDeadZone)
+    {
+      deltaX = 0;
+    }
+
     const distance = Math.min(maxRadius, Math.hypot(deltaX, deltaY));
     
     // --- LOGIQUE ANGLE CORRIGÉE ---
@@ -226,10 +241,17 @@ void setup() {
   WiFi.mode(WIFI_AP);
   WiFi.softAPConfig(apIP, apIP, netMsk);
   WiFi.softAP(ssid); 
+  dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
   dnsServer.start(DNS_PORT, "*", apIP);
   
   // Routes Serveur
   server.on("/", handleRoot);
+
+  server.on("/generate_204", handleRoot);   // Android
+  server.on("/gen_204", handleRoot);        // Android
+  server.on("/chat", handleRoot);           // Android
+  server.on("/fwlink", handleRoot);         // Apple
+
   server.on("/action", [](){
     if (server.hasArg("a") && server.hasArg("s")) {
       // Réception des données du Joystick
@@ -242,10 +264,17 @@ void setup() {
       server.send(200, "text/plain", "OK");
     }
   });
-  server.onNotFound(handleRoot);
+
+  // On force à aller sur la page de la manette
+  server.onNotFound([]() {
+    server.sendHeader("Location", String("http://") + apIP.toString(), true); 
+    server.send(302, "text/plain", ""); // Code 302 = Redirection temporaire
+  });
+
   server.begin();
   
-  Serial.println("Systeme pret. Connectez-vous au WiFi !");
+  // Debug
+  // Serial.println("Systeme prêt. Connectez-vous au WiFi !");
 }
 
 void loop() {
