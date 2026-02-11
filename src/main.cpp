@@ -6,7 +6,7 @@
 
 /* ================= CONFIGURATION MATERIELLE ================= */
 
-// --- Servomoteurs ---
+// --- Servomoteurs --- je modifie ce commentaire car je suuis macéo
 Servo servo1;
 Servo servo2;
 
