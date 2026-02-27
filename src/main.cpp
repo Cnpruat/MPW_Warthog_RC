@@ -53,7 +53,7 @@ void setMotor(int pinENA, int pinIN1, int pinIN2, int pwmVal, bool forward) {
 void piloterSysteme(int angleJoy, int forceJoy) {
   
   // Normalisation de la force entre 0.0 et 1.0
-  float forceJoy_norm = abs(forceJoy_norm)/100.0;
+  float forceJoy_norm = abs(forceJoy) / 100.0;
 
   // Fonction quadratique pour la PWM (accélération plus progressive)
   int pwm = (int)(forceJoy_norm*forceJoy_norm*255);
@@ -70,10 +70,16 @@ void piloterSysteme(int angleJoy, int forceJoy) {
 
   // Application aux 4 moteurs en même temps
   // (Mettre -forward si l'un des moteur tourne à l'envers)
-  setMotor(pinENA1, pinIN11, pinIN12, pwm, forward);
-  setMotor(pinENA2, pinIN21, pinIN22, pwm, forward); 
-  setMotor(pinENA3, pinIN31, pinIN32, pwm, forward);
-  setMotor(pinENA4, pinIN41, pinIN42, pwm, forward);
+  int intensite1 = 0, intensite2 = 0, intensite3 = 0, intensite4 = 0;
+  intensite1 = constrain(pwm, 0, 255);
+  intensite2 = constrain(pwm, 0, 255);
+  intensite3 = constrain(pwm, 0, 100);
+  intensite4 = constrain(pwm, 0, 120);
+
+  setMotor(pinENA1, pinIN11, pinIN12, intensite1, forward);
+  setMotor(pinENA2, pinIN21, pinIN22, intensite2, -forward); 
+  setMotor(pinENA3, pinIN31, pinIN32, intensite3, forward);
+  setMotor(pinENA4, pinIN41, pinIN42, intensite4, -forward);
 
   // Gestion des servos
   // L'angle Joystick arrive entre -90 (Gauche) et 90 (Droite). 0 = Centre.
