@@ -6,7 +6,11 @@
 
 /* ================= CONFIGURATION MATERIELLE ================= */
 
+<<<<<<< HEAD
 // --- Servomoteurs Direction (Voiture) ---
+=======
+// --- Servomoteurs --- je modifie ce commentaire car je suuis macéo
+>>>>>>> 49f401feb9baed97937faa2853d6093b03b01b34
 Servo servo1;
 Servo servo2;
 const int pinSERVO1 = 32;
@@ -78,6 +82,7 @@ void piloterSysteme(int angleJoy, int forceJoy) {
   int pwm = (int)(ratio * ratio * 255);
   if (pwm < 10) pwm = 0;
   
+<<<<<<< HEAD
   // Si marche arrière, on rend le pwm négatif
   if (forceJoy < 0) pwm = -pwm; 
 
@@ -91,6 +96,51 @@ void piloterSysteme(int angleJoy, int forceJoy) {
   int angleServo = map(angleJoy, -90, 90, -10, 10);
   servo1.write(70 - angleServo);
   servo2.write(40 - angleServo); 
+=======
+  // Normalisation de la force entre 0.0 et 1.0
+  float forceJoy_norm = abs(forceJoy) / 100.0;
+
+  // Fonction quadratique pour la PWM (accélération plus progressive)
+  int pwm = (int)(forceJoy_norm*forceJoy_norm*255);
+  
+  // Gestion du sens (avant / arrière)
+  bool forward = 0;
+  if (forceJoy >= 0)
+  {
+    forward = 1;
+  }
+
+  // Zone morte
+  if (pwm < 10) pwm = 0;
+
+  // Application aux 4 moteurs en même temps
+  // (Mettre -forward si l'un des moteur tourne à l'envers)
+  int intensite1 = 0, intensite2 = 0, intensite3 = 0, intensite4 = 0;
+  intensite1 = constrain(pwm, 0, 255);
+  intensite2 = constrain(pwm, 0, 255);
+  intensite3 = constrain(pwm, 0, 100);
+  intensite4 = constrain(pwm, 0, 120);
+
+  setMotor(pinENA1, pinIN11, pinIN12, intensite1, forward);
+  setMotor(pinENA2, pinIN21, pinIN22, intensite2, -forward); 
+  setMotor(pinENA3, pinIN31, pinIN32, intensite3, forward);
+  setMotor(pinENA4, pinIN41, pinIN42, intensite4, -forward);
+
+  // Gestion des servos
+  // L'angle Joystick arrive entre -90 (Gauche) et 90 (Droite). 0 = Centre.
+  // On doit le mapper vers l'angle Servo (disons 45° à 135°, avec 90° au centre)
+  int angleServo = map(angleJoy, -90, 90, 45, 135);
+  
+  // Contraintes de sécurité (limitation)
+  angleServo = constrain(angleServo, 45, 135);
+
+  // Application
+  servo1.write(angleServo);
+  servo2.write(180 - angleServo); // Miroir pour le 2ème servo
+  
+  // Affichage consol (debug)
+  // Serial.printf("Joy: %d° %d%% | Moteurs: %d | Servo: %d°\n", angleJoy, forceJoy, pwm, angleServo);
+>>>>>>> 49f401feb9baed97937faa2853d6093b03b01b34
 }
 
 /* ================= PAGE WEB (HTML/JS) ================= */
@@ -186,10 +236,29 @@ void handleRoot() {
       onMove(deltaX / maxRadius, deltaY / maxRadius, distance / maxRadius);
     };
 
+<<<<<<< HEAD
     knob.addEventListener('mousedown', startDrag); knob.addEventListener('touchstart', startDrag);
     window.addEventListener('mousemove', moveDrag); window.addEventListener('touchmove', moveDrag, { passive: false });
     window.addEventListener('mouseup', endDrag); window.addEventListener('touchend', endDrag);
   }
+=======
+    let deltaX = clientX - startX;
+    let deltaY = clientY - startY;
+
+    // Zone morte
+    const steeringDeadZone = 15;
+    if (Math.abs(deltaX) < steeringDeadZone)
+    {
+      deltaX = 0;
+    }
+
+    const distance = Math.min(maxRadius, Math.hypot(deltaX, deltaY));
+    
+    // --- LOGIQUE ANGLE CORRIGÉE ---
+    // atan2(x, -y) permet d'avoir 0° en haut (Nord), 90° à droite, -90° à gauche
+    let angleRad = Math.atan2(deltaX, -deltaY);
+    let degree = Math.round(angleRad * (180 / Math.PI));
+>>>>>>> 49f401feb9baed97937faa2853d6093b03b01b34
 
   // Joystick Deplacement
   let lastDriveTime = 0;
@@ -269,6 +338,7 @@ void handleRoot() {
   server.send(200, "text/html", page);
 }
 
+<<<<<<< HEAD
 /* ================= SERVEUR / SETUP ================= */
 void setupServer() {
   server.on("/", handleRoot);
@@ -276,6 +346,42 @@ void setupServer() {
   server.on("/gen_204", handleRoot);
   server.on("/fwlink", handleRoot);
   server.on("/hotspot-detect.html", handleRoot);
+=======
+/* ================= SETUP & LOOP ================= */
+void setup() {
+  Serial.begin(115200);
+
+  // Initialisation des MCCs
+  pinMode(pinENA1, OUTPUT); pinMode(pinIN11, OUTPUT); pinMode(pinIN12, OUTPUT); // Moteur 1
+  pinMode(pinENA2, OUTPUT); pinMode(pinIN21, OUTPUT); pinMode(pinIN22, OUTPUT); // Moteur 2
+  pinMode(pinENA3, OUTPUT); pinMode(pinIN31, OUTPUT); pinMode(pinIN32, OUTPUT); // Moteur 3
+  pinMode(pinENA4, OUTPUT); pinMode(pinIN41, OUTPUT); pinMode(pinIN42, OUTPUT); // Moteur 4
+
+  // Initialisation des Servos
+  servo1.setPeriodHertz(50);
+  servo1.attach(pinSERVO1, 500, 2400);
+  servo2.setPeriodHertz(50);
+  servo2.attach(pinSERVO2, 500, 2400);
+  
+  // Position initiale
+  servo1.write(90);
+  servo2.write(90);
+
+  // Init WiFi
+  WiFi.mode(WIFI_AP);
+  WiFi.softAPConfig(apIP, apIP, netMsk);
+  WiFi.softAP(ssid); 
+  dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
+  dnsServer.start(DNS_PORT, "*", apIP);
+  
+  // Routes Serveur
+  server.on("/", handleRoot);
+
+  server.on("/generate_204", handleRoot);   // Android
+  server.on("/gen_204", handleRoot);        // Android
+  server.on("/chat", handleRoot);           // Android
+  server.on("/fwlink", handleRoot);         // Apple
+>>>>>>> 49f401feb9baed97937faa2853d6093b03b01b34
 
   server.on("/action", [](){
     if (server.hasArg("a") && server.hasArg("s")) {
@@ -284,6 +390,7 @@ void setupServer() {
     }
   });
 
+<<<<<<< HEAD
   server.on("/turret", [](){
     if (server.hasArg("p") && server.hasArg("t")) {
       speedPan = server.arg("p").toInt();
@@ -324,6 +431,18 @@ void setupServer() {
   });
 
   server.begin();
+=======
+  // On force à aller sur la page de la manette
+  server.onNotFound([]() {
+    server.sendHeader("Location", String("http://") + apIP.toString(), true); 
+    server.send(302, "text/plain", ""); // Code 302 = Redirection temporaire
+  });
+
+  server.begin();
+  
+  // Debug
+  // Serial.println("Systeme prêt. Connectez-vous au WiFi !");
+>>>>>>> 49f401feb9baed97937faa2853d6093b03b01b34
 }
 
 void setup() {
