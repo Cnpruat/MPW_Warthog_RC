@@ -29,6 +29,7 @@ const int pinIN2[4] = {4, 17, 27, 14};
 const int pinCapteur1 = 21;
 const int pinCapteur2 = 3; 
 const float TICKS_PER_REV = 10.0;
+const float WHEEL_CIRCUMFERENCE_M = 9; 
 
 // Variables pour le calcul de vitesse sans interruption
 long countCapteur1 = 0;
@@ -54,12 +55,15 @@ bool isTankTurning = false;
 int targetSpeed[4]  = {0, 0, 0, 0}; 
 int currentSpeed[4] = {0, 0, 0, 0}; 
 unsigned long lastMotorUpdate = 0;
-const int ACCEL_STEP = 10; 
+const int ACCEL_STEP = 15; 
 
-// --- NOUVEAU : GESTION DE L'ENERGIE ---
-unsigned long lastMessageTime = 0; // Heure du dernier ordre reçu
-bool servosAttached = true;        // État actuel des servos
-const unsigned long SERVO_TIMEOUT = 2000; // Coupure après 2 secondes d'inactivité
+// --- GESTION DE L'ENERGIE ET SECURITE ---
+unsigned long lastMessageTime = 0; 
+bool turretServosAttached = true;  
+const unsigned long SERVO_TIMEOUT = 2000; 
+
+// MODIF: On augmente la tolérance du Watchdog à 1.5 secondes pour éviter les coupures intempestives
+const unsigned long SAFETY_TIMEOUT = 1500; 
 
 /* ================= CONFIGURATION WIFI ================= */
 const char* ssid = "Warthog_Controller";
@@ -70,32 +74,34 @@ IPAddress netMsk(255, 255, 255, 0);
 WebServer server(80);
 DNSServer dnsServer;
 
+/* ================= FONCTIONS SECURITE / ENERGIE ================= */
 
-/* ================= FONCTIONS GESTION ENERGIE ================= */
-
-// Réveille ou endort les servos pour limiter le courant
-void manageServos() {
-  if (millis() - lastMessageTime > SERVO_TIMEOUT) {
-    // Si on dépasse le temps, on coupe le signal PWM
-    if (servosAttached) {
-      servo1.detach();
-      servo2.detach();
-      servoTourellePan.detach();
-      servoTourelleTilt.detach();
-      servosAttached = false;
-      // Optionnel : Serial.println("Servos en veille (Economie d'energie)");
-    }
-  } else {
-    // Si on a reçu un message récent, on réactive le PWM avant d'écrire
-    if (!servosAttached) {
-      servo1.attach(pinSERVO1, 500, 2400); 
-      servo2.attach(pinSERVO2, 500, 2400); 
-      servoTourellePan.attach(pinTourellePan, 500, 2400); 
-      servoTourelleTilt.attach(pinTourelleTilt, 500, 2400); 
-      servosAttached = true;
-      // On restaure immédiatement leur dernière position connue
+void checkSafetyAndPower() {
+  unsigned long now = millis();
+  
+  // 1. SECURITE (Watchdog)
+  if (now - lastMessageTime > SAFETY_TIMEOUT) {
+    if (!isTankTurning) { 
+      targetSpeed[0] = targetSpeed[1] = targetSpeed[2] = targetSpeed[3] = 0;
+      currentAngleS1 = 82; 
+      currentAngleS2 = 81;
       servo1.write(currentAngleS1);
       servo2.write(currentAngleS2);
+    }
+  }
+
+  // 2. ENERGIE : Mise en veille de la TOURELLE uniquement
+  if (now - lastMessageTime > SERVO_TIMEOUT) {
+    if (turretServosAttached) {
+      servoTourellePan.detach();
+      servoTourelleTilt.detach();
+      turretServosAttached = false;
+    }
+  } else {
+    if (!turretServosAttached) {
+      servoTourellePan.attach(pinTourellePan, 500, 2400); 
+      servoTourelleTilt.attach(pinTourelleTilt, 500, 2400); 
+      turretServosAttached = true;
       servoTourellePan.write((int)currentPan);
       servoTourelleTilt.write((int)currentTilt);
     }
@@ -125,22 +131,18 @@ void piloterSysteme(int angleJoy, int forceJoy) {
   currentAngleS1 = 82 - angleServoOffset;
   currentAngleS2 = 81 - angleServoOffset;
   
-  if (servosAttached) {
-    servo1.write(currentAngleS1);
-    servo2.write(currentAngleS2); 
-  }
+  servo1.write(currentAngleS1);
+  servo2.write(currentAngleS2); 
 }
 
 /* ================= LOGIQUE DE MISE A JOUR (50Hz) ================= */
 void updateTurret() {
   if (!isTankTurning && (millis() - lastTurretUpdate >= 20)) { 
     if (speedPan != 0 || speedTilt != 0) {
-      
-      // --- MODIFICATION : INVERSION PAN --- (Le '-' au lieu du '+')
       currentPan = constrain(currentPan - (speedPan * 0.015), 0, 180);
       currentTilt = constrain(currentTilt + (speedTilt * 0.015), 20, 60); 
       
-      if (servosAttached) {
+      if (turretServosAttached) {
         servoTourellePan.write((int)currentPan);
         servoTourelleTilt.write((int)currentTilt);
       }
@@ -175,16 +177,12 @@ void handleRoot() {
   body { margin: 0; padding: 0; height: 100vh; background: radial-gradient(circle at center, #1a2a33, #000); overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: Arial, sans-serif; user-select: none; touch-action: none; }
   h2 { color: #00ffe1; letter-spacing: 2px; margin-bottom: 2px; font-size: 16px; text-align: center;}
   
-  /* Zone Télémétrie Globale */
   #telemetry-container { display: flex; flex-direction: column; align-items: center; gap: 5px; margin-bottom: 10px; }
-  
-  /* Vitesses */
   .telemetry-row { display: flex; gap: 15px; background: rgba(0,0,0,0.6); padding: 5px 15px; border-radius: 8px; border: 1px solid #ffcc00; box-shadow: 0 0 10px rgba(255,204,0,0.15); }
   .telemetry-item { color: #ffcc00; font-family: monospace; font-size: 14px; font-weight: bold; text-align: center; }
   .telemetry-label { font-size: 9px; color: #aaa; margin-bottom: 2px; letter-spacing: 1px;}
   .telemetry-val { font-size: 18px; text-shadow: 0 0 5px #ffcc00; }
   
-  /* Angles */
   .telemetry-row.angles { border-color: #00ffe1; box-shadow: 0 0 10px rgba(0,255,225,0.15); }
   .telemetry-row.angles .telemetry-item { color: #00ffe1; }
   .telemetry-row.angles .telemetry-val { text-shadow: 0 0 5px #00ffe1; font-size: 16px;}
@@ -209,7 +207,7 @@ void handleRoot() {
     <div class="telemetry-row">
       <div class="telemetry-item">
         <div class="telemetry-label">VIT. MOY.</div>
-        <div class="telemetry-val"><span id="rpm">0</span> <span style="font-size:10px">km/h</span></div>
+        <div class="telemetry-val"><span id="speed">0.00</span> <span style="font-size:10px">cm/s</span></div>
       </div>
     </div>
     
@@ -248,28 +246,67 @@ void handleRoot() {
   </div>
 
 <script>
+  // Variables globales pour stocker les commandes voulues
+  let cmdSteer = 0, cmdSpeed = 0;
+  let cmdPan = 0, cmdTilt = 0;
+  
+  // Variables pour vérifier si on a besoin d'envoyer (évite le spam)
+  let lastSentSteer = -999, lastSentSpeed = -999;
+  let lastSentPan = -999, lastSentTilt = -999;
+
+  // Récupération de la télémétrie (ralentie à 800ms pour soulager le réseau)
   setInterval(() => {
     fetch('/telemetry').then(r => r.json()).then(data => {
-      document.getElementById('rpm').innerText = data.rpm_mes.toFixed(0);
+      document.getElementById('speed').innerText = data.speed_ms.toFixed(2);
       document.getElementById('ang-s1').innerText = data.s1;
       document.getElementById('ang-s2').innerText = data.s2;
       document.getElementById('ang-pan').innerText = data.pan;
       document.getElementById('ang-tilt').innerText = data.tilt;
-    }).catch(console.error);
-  }, 500);
+    }).catch(()=>{});
+  }, 800);
+
+  // Boucle d'envoi PRINCIPALE (Tourne toutes les 200ms)
+  // C'est le cœur de l'optimisation : on n'envoie les infos que de manière ordonnée.
+  setInterval(() => {
+    // Envoi de la direction et de la vitesse
+    if (cmdSteer !== lastSentSteer || cmdSpeed !== lastSentSpeed || cmdSpeed !== 0) {
+      fetch(`/action?a=${cmdSteer}&s=${cmdSpeed}`).catch(()=>{});
+      lastSentSteer = cmdSteer;
+      lastSentSpeed = cmdSpeed;
+    }
+    
+    // Envoi de la tourelle
+    if (cmdPan !== lastSentPan || cmdTilt !== lastSentTilt || cmdPan !== 0 || cmdTilt !== 0) {
+      // Petite astuce : on décale cet envoi de 50ms pour ne pas saturer le serveur
+      setTimeout(() => {
+        fetch(`/turret?p=${cmdPan}&t=${cmdTilt}`).catch(()=>{});
+        lastSentPan = cmdPan;
+        lastSentTilt = cmdTilt;
+      }, 50);
+    }
+  }, 200);
 
   function setupJoystick(containerId, knobId, onMove, onRelease) {
     const container = document.getElementById(containerId), knob = document.getElementById(knobId);
     let isDragging = false, startX, startY;
     const maxRadius = 35; 
+    
     const startDrag = (e) => {
       isDragging = true; knob.style.transition = 'none';
       const rect = container.getBoundingClientRect();
       startX = rect.left + rect.width / 2; startY = rect.top + rect.height / 2;
       handleMove(e);
     };
+    
     const moveDrag = (e) => { if (isDragging) { e.preventDefault(); handleMove(e); } };
-    const endDrag = () => { isDragging = false; knob.style.transition = 'transform 0.2s ease-out'; knob.style.transform = `translate(0px, 0px)`; onRelease(); };
+    
+    const endDrag = () => { 
+      isDragging = false; 
+      knob.style.transition = 'transform 0.2s ease-out'; 
+      knob.style.transform = `translate(0px, 0px)`; 
+      onRelease(); 
+    };
+    
     const handleMove = (e) => {
       const clientX = e.touches ? e.touches[0].clientX : e.clientX;
       const clientY = e.touches ? e.touches[0].clientY : e.clientY;
@@ -279,43 +316,46 @@ void handleRoot() {
       knob.style.transform = `translate(${Math.cos(moveRad) * distance}px, ${Math.sin(moveRad) * distance}px)`;
       onMove(deltaX / maxRadius, deltaY / maxRadius, distance / maxRadius);
     };
+    
     knob.addEventListener('mousedown', startDrag); knob.addEventListener('touchstart', startDrag);
     window.addEventListener('mousemove', moveDrag); window.addEventListener('touchmove', moveDrag, { passive: false });
     window.addEventListener('mouseup', endDrag); window.addEventListener('touchend', endDrag);
   }
 
-  let lastDriveTime = 0;
+  // Joystick Véhicule (Met uniquement à jour les variables)
   setupJoystick('joystick-drive', 'knob-drive', (nx, ny, nd) => {
-    let steering = Math.max(-90, Math.min(90, Math.round(nx * 90)));
-    if (Math.abs(nx) < 0.3) steering = 0; 
-    let strength = nd < 0.2 ? 0 : Math.round(nd * 100);
+    let steering = Math.round(nx * 90);
+    if (Math.abs(nx) < 0.25) steering = 0; 
+    else steering = Math.max(-90, Math.min(90, steering));
+
+    let strength = Math.round(nd * 100);
+    if (nd < 0.3) strength = 0; 
     if (ny > 0) strength = -strength; 
 
     document.getElementById('val-angle').innerText = steering;
     document.getElementById('val-speed').innerText = strength;
 
-    if (Date.now() - lastDriveTime > 100) {
-      lastDriveTime = Date.now();
-      fetch(`/action?a=${steering}&s=${strength}`).catch(()=>{});
-    }
+    cmdSteer = steering;
+    cmdSpeed = strength;
+
   }, () => {
-    document.getElementById('val-angle').innerText = 0; document.getElementById('val-speed').innerText = 0;
-    fetch(`/action?a=0&s=0`).catch(()=>{});
+    document.getElementById('val-angle').innerText = 0; 
+    document.getElementById('val-speed').innerText = 0;
+    cmdSteer = 0;
+    cmdSpeed = 0;
   });
 
-  let lastTurretTime = 0;
+  // Joystick Tourelle (Met uniquement à jour les variables)
   setupJoystick('joystick-turret', 'knob-turret', (nx, ny, nd) => {
-    let pSpeed = Math.abs(nx) > 0.2 ? Math.round(nx * 100) : 0;
-    let tSpeed = Math.abs(ny) > 0.2 ? Math.round(ny * 100) : 0;
-    document.getElementById('val-pan').innerText = pSpeed; document.getElementById('val-tilt').innerText = -tSpeed; 
-
-    if (Date.now() - lastTurretTime > 100) {
-      lastTurretTime = Date.now();
-      fetch(`/turret?p=${pSpeed}&t=${tSpeed}`).catch(()=>{});
-    }
+    cmdPan = Math.abs(nx) > 0.25 ? Math.round(nx * 100) : 0;
+    cmdTilt = Math.abs(ny) > 0.25 ? Math.round(ny * 100) : 0;
+    document.getElementById('val-pan').innerText = cmdPan; 
+    document.getElementById('val-tilt').innerText = -cmdTilt; 
   }, () => {
-    document.getElementById('val-pan').innerText = 0; document.getElementById('val-tilt').innerText = 0;
-    fetch(`/turret?p=0&t=0`).catch(()=>{});
+    document.getElementById('val-pan').innerText = 0; 
+    document.getElementById('val-tilt').innerText = 0;
+    cmdPan = 0;
+    cmdTilt = 0;
   });
 
   const btnTank = document.getElementById('btn-tank');
@@ -329,6 +369,7 @@ void handleRoot() {
   btnTank.addEventListener('mousedown', (e) => setTankMode(true, e));
   btnTank.addEventListener('touchstart', (e) => setTankMode(true, e));
   ['mouseup','mouseleave','touchend','touchcancel'].forEach(evt => btnTank.addEventListener(evt, (e) => setTankMode(false, e)));
+
 </script>
 </body>
 </html>
@@ -342,7 +383,6 @@ void setupServer() {
   
   server.on("/action", [](){
     lastMessageTime = millis();
-    manageServos(); // On réveille les servos IMMÉDIATEMENT avant de leur donner un ordre
     if (server.hasArg("a") && server.hasArg("s")) {
       piloterSysteme(server.arg("a").toInt(), server.arg("s").toInt());
       server.send(200, "text/plain", "OK");
@@ -351,7 +391,6 @@ void setupServer() {
   
   server.on("/turret", [](){
     lastMessageTime = millis();
-    manageServos(); // On réveille les servos
     if (server.hasArg("p") && server.hasArg("t")) {
       speedPan = server.arg("p").toInt(); speedTilt = server.arg("t").toInt();
       server.send(200, "text/plain", "OK");
@@ -360,20 +399,17 @@ void setupServer() {
   
   server.on("/tankturn", [](){
     lastMessageTime = millis();
-    manageServos(); // On réveille les servos
     if (server.hasArg("state")) {
       isTankTurning = (server.arg("state").toInt() == 1);
       
       if (isTankTurning) {
-        // Activation du mode Tank
         currentAngleS1 = 82; currentAngleS2 = 81; 
-        if (servosAttached) { servo1.write(82); servo2.write(81); }
+        servo1.write(82); servo2.write(81); 
         targetSpeed[0] = targetSpeed[3] = 200;   
         targetSpeed[1] = targetSpeed[2] = -200;  
       } else {
-        // --- MODIFICATION : RETOUR AU CENTRE ---
         currentAngleS1 = 82; currentAngleS2 = 81; 
-        if (servosAttached) { servo1.write(82); servo2.write(81); }
+        servo1.write(82); servo2.write(81); 
         targetSpeed[0] = targetSpeed[1] = targetSpeed[2] = targetSpeed[3] = 0;
       }
       server.send(200, "text/plain", "OK");
@@ -381,8 +417,12 @@ void setupServer() {
   });
   
   server.on("/telemetry", [](){
+    // Formule m/s : (RPM / 60) * Circonférence (ici on suppose 0.09 = 9cm de circonférence)
+    float avgRPM = (rpmCapteur1 + rpmCapteur2) / 2.0;
+    float speed_ms = (avgRPM / 60.0) * WHEEL_CIRCUMFERENCE_M;
+
     String json = "{";
-    json += "\"rpm_mes\":" + String(((rpmCapteur1 + rpmCapteur2) / 2.0)*0.09/60) + ",";
+    json += "\"speed_ms\":" + String(speed_ms, 2) + ",";
     json += "\"s1\":" + String(currentAngleS1) + ",";
     json += "\"s2\":" + String(currentAngleS2) + ",";
     json += "\"pan\":" + String((int)currentPan) + ",";
@@ -401,7 +441,7 @@ void setupServer() {
 void setup() {
   Serial.begin(115200);
   
-  lastMessageTime = millis(); // Init du timer
+  lastMessageTime = millis();
 
   pinMode(pinCapteur1, INPUT_PULLUP);
   pinMode(pinCapteur2, INPUT_PULLUP);
@@ -429,8 +469,7 @@ void setup() {
 void loop() {
   unsigned long now = millis();
   
-  // Gestion de l'économie d'énergie des servos
-  manageServos();
+  checkSafetyAndPower();
   
   // Lecture des capteurs avec Anti-Rebond (Debounce)
   bool currentState1 = digitalRead(pinCapteur1);
