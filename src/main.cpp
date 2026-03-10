@@ -20,7 +20,7 @@ Servo servoTourelleTilt;
 const int pinTourellePan = 18;
 const int pinTourelleTilt = 19;
 
-// --- Moteurs DC (Tableaux : Moteur 1, 2, 3, 4) ---
+// --- Moteurs Dagu 1 à 4 ---
 const int pinENA[4] = {15, 5, 25, 13};
 const int pinIN1[4] = {2, 16, 26, 12};
 const int pinIN2[4] = {4, 17, 27, 14};
@@ -31,13 +31,13 @@ const int pinCapteur2 = 3;
 const float TICKS_PER_REV = 10.0;
 const float WHEEL_CIRCUMFERENCE_M = 9; 
 
-// Variables pour le calcul de vitesse sans interruption
+// Variables pour le calcul de vitesse
 long countCapteur1 = 0;
 long countCapteur2 = 0;
 unsigned long lastTimeSpeedMeasured = 0;
 float rpmCapteur1 = 0.0, rpmCapteur2 = 0.0;
 
-// Anti-rebond (Debounce)
+// Anti-rebond
 bool lastStateCapteur1 = HIGH;
 bool lastStateCapteur2 = HIGH;
 unsigned long lastDebounceTime1 = 0;
@@ -57,16 +57,14 @@ int currentSpeed[4] = {0, 0, 0, 0};
 unsigned long lastMotorUpdate = 0;
 const int ACCEL_STEP = 15; 
 
-// --- GESTION DE L'ENERGIE ET SECURITE ---
+// --- GESTION DE L'ENERGIE ---
 unsigned long lastMessageTime = 0; 
 bool turretServosAttached = true;  
 const unsigned long SERVO_TIMEOUT = 2000; 
-
-// MODIF: On augmente la tolérance du Watchdog à 1.5 secondes pour éviter les coupures intempestives
 const unsigned long SAFETY_TIMEOUT = 1500; 
 
 /* ================= CONFIGURATION WIFI ================= */
-const char* ssid = "Warthog_Controller";
+const char* ssid = "MPW_Controller";
 const byte DNS_PORT = 53;
 IPAddress apIP(192, 168, 4, 1);
 IPAddress netMsk(255, 255, 255, 0);
@@ -74,12 +72,12 @@ IPAddress netMsk(255, 255, 255, 0);
 WebServer server(80);
 DNSServer dnsServer;
 
-/* ================= FONCTIONS SECURITE / ENERGIE ================= */
+/* ================= FONCTIONS ENERGIE ================= */
 
 void checkSafetyAndPower() {
   unsigned long now = millis();
   
-  // 1. SECURITE (Watchdog)
+  // Watchdog
   if (now - lastMessageTime > SAFETY_TIMEOUT) {
     if (!isTankTurning) { 
       targetSpeed[0] = targetSpeed[1] = targetSpeed[2] = targetSpeed[3] = 0;
@@ -90,7 +88,7 @@ void checkSafetyAndPower() {
     }
   }
 
-  // 2. ENERGIE : Mise en veille de la TOURELLE uniquement
+  // ENERGIE : Mise en veille de la TOURELLE 
   if (now - lastMessageTime > SERVO_TIMEOUT) {
     if (turretServosAttached) {
       servoTourellePan.detach();
@@ -110,6 +108,7 @@ void checkSafetyAndPower() {
 
 /* ================= FONCTIONS PILOTAGE ================= */
 void setMotor(int index, int speed) {
+  // Ecriture vitesse et sens de rotation
   bool forward = (speed >= 0);
   digitalWrite(pinIN1[index], forward ? LOW : HIGH);
   digitalWrite(pinIN2[index], forward ? HIGH : LOW);
@@ -117,6 +116,7 @@ void setMotor(int index, int speed) {
 }
 
 void piloterSysteme(int angleJoy, int forceJoy) {
+  // Interpretation joystick gauche (vitesse et angle)
   if (isTankTurning) return; 
 
   float ratio = abs(forceJoy) / 100.0;
@@ -135,7 +135,7 @@ void piloterSysteme(int angleJoy, int forceJoy) {
   servo2.write(currentAngleS2); 
 }
 
-/* ================= LOGIQUE DE MISE A JOUR (50Hz) ================= */
+/* ================= MISE A JOUR ================= */
 void updateTurret() {
   if (!isTankTurning && (millis() - lastTurretUpdate >= 20)) { 
     if (speedPan != 0 || speedTilt != 0) {
@@ -438,20 +438,24 @@ void setupServer() {
   server.begin();
 }
 
+/* ================= SETUP ================= */
 void setup() {
   Serial.begin(115200);
   
   lastMessageTime = millis();
 
+  // Capteurs
   pinMode(pinCapteur1, INPUT_PULLUP);
   pinMode(pinCapteur2, INPUT_PULLUP);
 
+  // Moteurs
   for (int i = 0; i < 4; i++) {
     pinMode(pinENA[i], OUTPUT);
     pinMode(pinIN1[i], OUTPUT);
     pinMode(pinIN2[i], OUTPUT);
   }
 
+  // Servomoteurs initialisations positions
   servo1.setPeriodHertz(50); servo1.attach(pinSERVO1, 500, 2400); servo1.write(currentAngleS1);
   servo2.setPeriodHertz(50); servo2.attach(pinSERVO2, 500, 2400); servo2.write(currentAngleS2); 
   servoTourellePan.setPeriodHertz(50); servoTourellePan.attach(pinTourellePan, 500, 2400); servoTourellePan.write((int)currentPan); 
@@ -471,7 +475,7 @@ void loop() {
   
   checkSafetyAndPower();
   
-  // Lecture des capteurs avec Anti-Rebond (Debounce)
+  // Lecture des capteurs avec Anti-Rebond
   bool currentState1 = digitalRead(pinCapteur1);
   if (currentState1 != lastStateCapteur1) {
     if (now - lastDebounceTime1 > DEBOUNCE_DELAY) {
@@ -490,6 +494,7 @@ void loop() {
     lastStateCapteur2 = currentState2;
   }
 
+  // Estimation de la vitesse
   if (now - lastTimeSpeedMeasured >= 100) {
     rpmCapteur1 = ((float)countCapteur1 / TICKS_PER_REV) * (60000.0 / 100.0);
     rpmCapteur2 = ((float)countCapteur2 / TICKS_PER_REV) * (60000.0 / 100.0);
